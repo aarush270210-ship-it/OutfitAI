@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Outfit AI</title>
+  <style>
+    body {
+      font-family: Arial;
+      background: #0f172a;
+      color: white;
+      text-align: center;
+    }
+
+    select, input, button {
+      padding: 10px;
+      margin: 8px;
+      border-radius: 8px;
+      border: none;
+    }
+
+    button {
+      background: #22c55e;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    .card {
+      background: #1e293b;
+      margin: 15px auto;
+      padding: 15px;
+      border-radius: 12px;
+      width: 85%;
+    }
+
+    .best {
+      border: 2px solid #22c55e;
+      box-shadow: 0 0 15px #22c55e;
+    }
+  </style>
+</head>
+
+<body>
+
+<h1>🔥 AI Outfit Recommender</h1>
+
+<select id="gender">
+  <option value="">Gender</option>
+  <option value="male">Male</option>
+  <option value="female">Female</option>
+</select>
+
+<select id="style">
+  <option value="">Style</option>
+  <option value="trendy">Trendy</option>
+  <option value="casual">Casual</option>
+  <option value="formal">Formal</option>
+</select>
+
+<select id="occasion">
+  <option value="">Occasion</option>
+  <option value="party">Party</option>
+  <option value="daily">Daily</option>
+  <option value="wedding">Wedding</option>
+</select>
+
+<br>
+
+<input type="number" id="minPrice" placeholder="Min Price">
+<input type="number" id="maxPrice" placeholder="Max Price">
+
+<br>
+
+<button onclick="generate()">Generate Outfit</button>
+
+<div id="result"></div>
+
+<script>
+
+const SHEET_URL = "https://opensheet.elk.sh/1DJnbr2ENzUA60hRDl92DACEtTGnTlzGFMupbaQl7dnA/sheet1";
+
+let inventory = [];
+
+function normalize(v) {
+  return v ? v.toString().trim().toLowerCase() : "";
+}
+
+const colorMatch = {
+  black: ["white", "grey", "blue", "red", "yellow"],
+  white: ["black", "blue", "grey"],
+  blue: ["white", "black", "grey"],
+  red: ["black", "white"],
+  yellow: ["black", "blue"],
+  grey: ["black", "white"]
+};
+
+async function loadData() {
+  const res = await fetch(SHEET_URL);
+  const data = await res.json();
+
+  inventory = data.map(item => ({
+    ItemName: item.ItemName || "Unknown",
+    category: normalize(item.Category),
+    style: normalize(item.Style),
+    color: normalize(item.Color),
+    price: Number(item.Price) || 0,
+    occasion: normalize(item.Occasion),
+    fit: normalize(item.Fit),
+    gender: normalize(item.Gender)
+  }));
+}
+
+loadData();
+
+
+// 🧠 AI EXPLANATION FUNCTION
+function generateExplanation(o, style, occasion) {
+
+  let parts = [];
+
+  if (o.reasons.includes("Top style match") || o.reasons.includes("Bottom style match")) {
+    parts.push(`matches the ${style} style you're going for`);
+  }
+
+  if (o.reasons.some(r => r.includes("color"))) {
+    parts.push("uses colors that complement each other well");
+  }
+
+  if (o.totalPrice < 3000) {
+    parts.push("stays within a budget-friendly range");
+  } else if (o.totalPrice < 5000) {
+    parts.push("keeps a balanced price-to-style ratio");
+  }
+
+  if (o.reasons.includes("Fit matches")) {
+    parts.push("maintains a consistent fit throughout the outfit");
+  }
+
+  if (o.reasons.includes("Perfect for occasion")) {
+    parts.push(`is well-suited for a ${occasion} setting`);
+  }
+
+  return "This outfit works because it " + parts.join(", ") + ".";
+}
+
+
+
+function generate() {
+
+  const gender = normalize(document.getElementById("gender").value);
+  const style = normalize(document.getElementById("style").value);
+  const occasion = normalize(document.getElementById("occasion").value);
+
+  const minPrice = Number(document.getElementById("minPrice").value) || 0;
+  const maxPrice = Number(document.getElementById("maxPrice").value) || 999999;
+
+  const filtered = inventory.filter(i =>
+    (!gender || i.gender === gender) &&
+    (!occasion || i.occasion === occasion) &&
+    i.price >= minPrice &&
+    i.price <= maxPrice
+  );
+
+  const tops = filtered.filter(i => i.category.includes("top"));
+  const bottoms = filtered.filter(i => i.category.includes("bottom"));
+  const shoes = filtered.filter(i => i.category.includes("shoe"));
+
+  if (!tops.length || !bottoms.length || !shoes.length) {
+    document.getElementById("result").innerHTML =
+      "❌ Not enough matching items";
+    return;
+  }
+
+  let outfits = [];
+
+  for (let t of tops) {
+    for (let b of bottoms) {
+      for (let s of shoes) {
+
+        let score = 0;
+        let reasons = [];
+        let totalPrice = t.price + b.price + s.price;
+
+        if (t.style === style) { score += 2; reasons.push("Top style match"); }
+        if (b.style === style) { score += 2; reasons.push("Bottom style match"); }
+        if (s.style === style) { score += 1; reasons.push("Shoe style match"); }
+
+        if (colorMatch[t.color]?.includes(b.color)) {
+          score += 2;
+          reasons.push("color match");
+        }
+
+        if (colorMatch[b.color]?.includes(s.color)) {
+          score += 1;
+          reasons.push("color match");
+        }
+
+        if (totalPrice < 3000) {
+          score += 2;
+          reasons.push("Budget friendly");
+        } else if (totalPrice < 5000) {
+          score += 1;
+        }
+
+        if (t.fit === b.fit) {
+          score += 1;
+          reasons.push("Fit matches");
+        }
+
+        if (t.occasion === occasion) {
+          score += 2;
+          reasons.push("Perfect for occasion");
+        }
+
+        outfits.push({ top: t, bottom: b, shoes: s, score, reasons, totalPrice });
+      }
+    }
+  }
+
+  outfits.sort((a, b) => b.score - a.score);
+
+  let html = "";
+
+  outfits.slice(0, 3).forEach((o, i) => {
+
+    let explanation = generateExplanation(o, style, occasion);
+
+    html += `
+      <div class="card ${i === 0 ? 'best' : ''}">
+        <h2>${i === 0 ? "⭐ Best Match" : "Option " + (i+1)}</h2>
+
+        <p><b>Top:</b> ${o.top.ItemName}</p>
+        <p><b>Bottom:</b> ${o.bottom.ItemName}</p>
+        <p><b>Shoes:</b> ${o.shoes.ItemName}</p>
+
+        <p>💰 ₹${o.totalPrice}</p>
+        <p>🧠 Score: ${o.score}</p>
+
+        <p style="color:#38bdf8;">🤖 ${explanation}</p>
+      </div>
+    `;
+  });
+
+  document.getElementById("result").innerHTML = html;
+}
+
+</script>
+
+</body>
+</html>
